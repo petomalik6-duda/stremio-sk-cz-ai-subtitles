@@ -1,4 +1,4 @@
-# Stremio SK/CZ AI Subtitles v1.0.4
+# Stremio SK/CZ AI Subtitles v1.0.5
 
 
 Samostatný Stremio addon, ktorý vyhľadá zdrojové titulky cez OpenSubtitles a **online pri výbere** ich preloží cez Gemini do slovenčiny alebo češtiny. Preložený WebVTT súbor sa uloží do cache, takže ďalšie prehratie je okamžité.
@@ -81,8 +81,13 @@ Ak sa zobrazí iba chybový titulok, otvor Render log. Addon zámerne vracia chy
 - Addon má jednoduchý hodinový rate limit pre online preklady.
 
 
-## Diagnostika v1.0.4
+## Diagnostika v1.0.5
 
 - `/debug/recent-requests` ukáže, či Stremio volá subtitle endpoint.
 - `/test.vtt` je krátky testovací WebVTT súbor.
 - Subtitle URL sú krátke kvôli kompatibilite s Android TV/Google TV.
+
+
+## Online preklad bez timeoutu (v1.0.5)
+
+Pri prvom výbere titulkov server okamžite vráti informačnú stopu a preklad pokračuje na pozadí. Po 30–60 sekundách vyber tú istú titulkovú stopu znova. Po dokončení je ďalšie načítanie okamžité z cache.

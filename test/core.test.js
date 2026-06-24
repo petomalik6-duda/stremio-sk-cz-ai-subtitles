@@ -69,7 +69,7 @@ test("filename fallback query", () => {
 });
 
 
-test("TV-compatible language codes", () => {
-  assert.equal(LANGUAGE_META.sk.stremio, "slk");
-  assert.equal(LANGUAGE_META.cs.stremio, "ces");
+test("Stremio legacy ISO 639-2 language codes", () => {
+  assert.equal(LANGUAGE_META.sk.stremio, "slo");
+  assert.equal(LANGUAGE_META.cs.stremio, "cze");
 });

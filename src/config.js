@@ -45,8 +45,8 @@ export function decodeConfig(token) {
 }
 
 export const LANGUAGE_META = Object.freeze({
-  sk: { stremio: "slk", name: "slovenčiny", label: "Slovenské AI" },
-  cs: { stremio: "ces", name: "češtiny", label: "České AI" },
+  sk: { stremio: "slo", name: "slovenčiny", label: "Slovenské AI" },
+  cs: { stremio: "cze", name: "češtiny", label: "České AI" },
   en: { name: "angličtiny" },
   de: { name: "nemčiny" },
   pl: { name: "poľštiny" },

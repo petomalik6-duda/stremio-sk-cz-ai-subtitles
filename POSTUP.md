@@ -77,3 +77,12 @@ CACHE_DIR=/var/data/subtitle-cache
 ```
 
 Bez persistentného disku addon stále funguje, ale po deployi môže rovnaké titulky znovu stiahnuť a preložiť.
+
+
+## Použitie verzie 1.0.5
+
+1. Spusť film alebo epizódu.
+2. Vyber Slovak/Czech AI titulky.
+3. Zobrazí sa informácia, že online preklad prebieha.
+4. Po 30–60 sekundách otvor menu titulkov a vyber rovnakú stopu znova.
+5. Hotový preklad sa načíta a uloží do cache.

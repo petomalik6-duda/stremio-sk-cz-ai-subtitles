@@ -8,6 +8,18 @@ import { parseMediaId } from "./media.js";
 
 const inFlight = new Map();
 
+const translationJobs = new Map();
+
+function pruneTranslationJobs() {
+  const cutoff = Date.now() - 6 * 60 * 60 * 1000;
+  for (const [jobId, state] of translationJobs.entries()) {
+    const timestamp = state.finishedAt || state.startedAt || 0;
+    if (timestamp < cutoff) translationJobs.delete(jobId);
+  }
+}
+
+setInterval(pruneTranslationJobs, 30 * 60 * 1000).unref();
+
 async function once(key, worker) {
   if (inFlight.has(key)) return inFlight.get(key);
   const promise = worker().finally(() => inFlight.delete(key));
@@ -128,4 +140,64 @@ export async function buildTranslatedSubtitle(payload) {
     await writeAtomic(targetFile, vtt);
     return { vtt, cached: false };
   });
+}
+
+
+export function startTranslationJob(jobId, payload) {
+  const existing = translationJobs.get(jobId);
+  if (existing && (existing.status === "pending" || existing.status === "done")) return existing;
+
+  const state = {
+    jobId,
+    status: "pending",
+    startedAt: Date.now(),
+    finishedAt: null,
+    error: null,
+    result: null,
+    promise: null
+  };
+
+  state.promise = buildTranslatedSubtitle(payload)
+    .then((result) => {
+      state.status = "done";
+      state.finishedAt = Date.now();
+      state.result = result;
+      return result;
+    })
+    .catch((error) => {
+      state.status = "error";
+      state.finishedAt = Date.now();
+      state.error = error instanceof Error ? error.message : String(error);
+      throw error;
+    });
+
+  // Prevent an unhandled rejection when the HTTP request has already returned
+  // the loading subtitle while translation continues in the background.
+  state.promise.catch(() => {});
+  translationJobs.set(jobId, state);
+  return state;
+}
+
+export function getTranslationJobState(jobId) {
+  const state = translationJobs.get(jobId);
+  if (!state) return null;
+  return {
+    jobId: state.jobId,
+    status: state.status,
+    startedAt: state.startedAt,
+    finishedAt: state.finishedAt,
+    error: state.error,
+    cached: state.result?.cached ?? null
+  };
+}
+
+export async function waitForTranslationJob(state, timeoutMs = 2500) {
+  if (!state) return null;
+  if (state.status === "done") return state.result;
+  if (state.status === "error") throw new Error(state.error || "Preklad zlyhal");
+  const timeout = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), Math.max(0, Number(timeoutMs) || 0));
+    timer.unref?.();
+  });
+  return Promise.race([state.promise, timeout]);
 }

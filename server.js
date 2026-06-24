@@ -4,7 +4,7 @@ import { decodeConfig, encodeConfig, normalizeConfig } from "./src/config.js";
 import { parseExtra } from "./src/media.js";
 import { verifyPayload } from "./src/token.js";
 import { ensureCacheDirs, cleanupCache, readJob } from "./src/cache.js";
-import { listTranslationOptions, buildTranslatedSubtitle, describeLookup } from "./src/service.js";
+import { listTranslationOptions, buildTranslatedSubtitle, describeLookup, startTranslationJob, getTranslationJobState, waitForTranslationJob } from "./src/service.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 7000);
@@ -45,11 +45,11 @@ function manifest(configToken) {
   const config = decodeConfig(configToken);
   const targetLabel = config.targets.map((value) => value.toUpperCase()).join("+");
   return {
-    id: "com.petomalik.stremio.skcz.ai.subtitles.v104",
-    version: "1.0.4",
-    name: `SK/CZ AI titulky v1.0.4 (${targetLabel})`,
+    id: "com.petomalik.stremio.skcz.ai.subtitles.v105",
+    version: "1.0.5",
+    name: `SK/CZ AI titulky v1.0.5 (${targetLabel})`,
     description: "Online preklad titulkov do slovenčiny a češtiny cez OpenSubtitles a Gemini.",
-    resources: ["subtitles"],
+    resources: [{ name: "subtitles", types: ["movie", "series"] }],
     types: ["movie", "series"],
     catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: false }
@@ -78,7 +78,7 @@ app.get("/manifest.json", (req, res) => { res.setHeader("Cache-Control", "no-sto
 app.get("/:config/manifest.json", (req, res) => { res.setHeader("Cache-Control", "no-store"); res.json(manifest(req.params.config)); });
 app.get("/health", (req, res) => res.json({
   ok: true,
-  version: "1.0.4",
+  version: "1.0.5",
   geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
   openSubtitlesConfigured: Boolean(process.env.OPENSUBTITLES_API_KEY),
   openSubtitlesAuthenticated: Boolean(process.env.OPENSUBTITLES_TOKEN || (process.env.OPENSUBTITLES_USERNAME && process.env.OPENSUBTITLES_PASSWORD)),
@@ -97,7 +97,7 @@ app.get(["/debug/subtitles/:type/:id.json", "/:config/debug/subtitles/:type/:id.
   }
 });
 
-app.get("/debug/recent-requests", (req, res) => res.json({ ok: true, version: "1.0.4", requests: recentSubtitleRequests }));
+app.get("/debug/recent-requests", (req, res) => res.json({ ok: true, version: "1.0.5", requests: recentSubtitleRequests }));
 
 app.get("/test.vtt", (req, res) => {
   res.type("text/vtt; charset=utf-8").send("WEBVTT\n\n00:00:00.000 --> 00:00:08.000\nSK/CZ AI subtitle addon je pripojený.\n");
@@ -129,21 +129,47 @@ app.get("/subtitle/:type/:id/:extra.json", subtitleHandler);
 app.get("/:config/subtitle/:type/:id.json", subtitleHandler);
 app.get("/:config/subtitle/:type/:id/:extra.json", subtitleHandler);
 
+function loadingVtt(target, status = "pending") {
+  const language = target === "cs" ? "českých" : "slovenských";
+  const detail = status === "pending"
+    ? `Online preklad ${language} titulkov prebieha. O 30–60 sekúnd znova vyber rovnaké titulky.`
+    : `Online preklad ${language} titulkov sa pripravuje. Znova vyber rovnaké titulky.`;
+  return `WEBVTT\n\n00:00:00.000 --> 04:00:00.000\n${detail}\n`;
+}
+
+app.get("/debug/job/:jobId", (req, res) => {
+  const state = getTranslationJobState(req.params.jobId);
+  return res.json({ ok: true, version: "1.0.5", state });
+});
+
 app.get("/t/:jobId.vtt", async (req, res) => {
   res.setHeader("Content-Type", "text/vtt; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cache-Control", "public, max-age=86400, stale-if-error=604800");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   if (!allowTranslation(req)) return res.status(429).send(errorVtt("Bol prekročený hodinový limit prekladov."));
   try {
     const payload = await readJob(req.params.jobId);
     if (!payload) throw new Error("Prekladová úloha už nie je dostupná. Znovu otvor titulky v prehrávači.");
     if (!payload.exp || Date.now() > Number(payload.exp)) throw new Error("Prekladová úloha vypršala. Znovu otvor titulky v prehrávači.");
-    const { vtt, cached } = await buildTranslatedSubtitle(payload);
-    res.setHeader("X-Translation-Cache", cached ? "HIT" : "MISS");
-    return res.send(vtt);
+
+    const state = startTranslationJob(req.params.jobId, payload);
+    const ready = await waitForTranslationJob(state, Number(process.env.FIRST_RESPONSE_WAIT_MS || 2500));
+    if (ready?.vtt) {
+      res.setHeader("X-Translation-State", "ready");
+      res.setHeader("X-Translation-Cache", ready.cached ? "HIT" : "MISS");
+      return res.send(ready.vtt);
+    }
+
+    const current = getTranslationJobState(req.params.jobId);
+    if (current?.status === "error") throw new Error(current.error || "Preklad zlyhal");
+    res.setHeader("X-Translation-State", "pending");
+    return res.send(loadingVtt(payload.target, current?.status || "pending"));
   } catch (error) {
     console.error("[translate-job]", error);
-    return res.status(500).send(errorVtt(error.message));
+    res.setHeader("X-Translation-State", "error");
+    return res.status(200).send(errorVtt(error.message));
   }
 });
 
