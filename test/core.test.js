@@ -13,7 +13,11 @@ test("config round-trip", () => {
 });
 
 test("series id parser", () => {
-  assert.deepEqual(parseMediaId("series", "tt1234567:2:5"), { imdbId: "1234567", season: 2, episode: 5 });
+  const parsed = parseMediaId("series", "tt1234567:2:5");
+  assert.equal(parsed.imdbId, "1234567");
+  assert.equal(parsed.season, 2);
+  assert.equal(parsed.episode, 5);
+  assert.equal(parsed.stremioVideoId, "tt1234567:2:5");
 });
 
 test("extra parser", () => {
@@ -42,4 +46,24 @@ test("signed payload", () => {
   const token = signPayload({ fileId: 1, target: "sk" }, 1);
   const decoded = verifyPayload(token);
   assert.equal(decoded.fileId, 1);
+});
+
+test("subtitle protocol hash with videoId extra", () => {
+  assert.deepEqual(parseMediaId("movie", "0123456789abcdef", { videoId: "tt0133093", videoHash: "0123456789abcdef" }), {
+    imdbId: "0133093",
+    stremioVideoId: "tt0133093",
+    season: null,
+    episode: null,
+    videoHash: "0123456789abcdef",
+    videoSize: null,
+    filename: null,
+    query: null
+  });
+});
+
+test("filename fallback query", () => {
+  const parsed = parseMediaId("series", "unknown", { filename: "Example.Show.S02E03.1080p.WEB-DL.mkv" });
+  assert.equal(parsed.season, 2);
+  assert.equal(parsed.episode, 3);
+  assert.match(parsed.query, /Example Show S02E03/i);
 });

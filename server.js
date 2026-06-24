@@ -4,7 +4,7 @@ import { decodeConfig, encodeConfig, normalizeConfig } from "./src/config.js";
 import { parseExtra } from "./src/media.js";
 import { verifyPayload } from "./src/token.js";
 import { ensureCacheDirs, cleanupCache } from "./src/cache.js";
-import { listTranslationOptions, buildTranslatedSubtitle } from "./src/service.js";
+import { listTranslationOptions, buildTranslatedSubtitle, describeLookup } from "./src/service.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 7000);
@@ -34,13 +34,12 @@ function manifest(configToken) {
   const targetLabel = config.targets.map((value) => value.toUpperCase()).join("+");
   return {
     id: "com.petomalik.stremio.skcz.ai.subtitles",
-    version: "1.0.2",
+    version: "1.0.3",
     name: `SK/CZ AI titulky (${targetLabel})`,
     description: "Online preklad titulkov do slovenčiny a češtiny cez OpenSubtitles a Gemini.",
-    resources: [{ name: "subtitles", types: ["movie", "series"], idPrefixes: ["tt"] }],
+    resources: [{ name: "subtitles", types: ["movie", "series"] }],
     types: ["movie", "series"],
     catalogs: [],
-    idPrefixes: ["tt"],
     behaviorHints: { configurable: true, configurationRequired: false }
   };
 }
@@ -67,7 +66,7 @@ app.get("/manifest.json", (req, res) => res.json(manifest(null)));
 app.get("/:config/manifest.json", (req, res) => res.json(manifest(req.params.config)));
 app.get("/health", (req, res) => res.json({
   ok: true,
-  version: "1.0.2",
+  version: "1.0.3",
   geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
   openSubtitlesConfigured: Boolean(process.env.OPENSUBTITLES_API_KEY),
   openSubtitlesAuthenticated: Boolean(process.env.OPENSUBTITLES_TOKEN || (process.env.OPENSUBTITLES_USERNAME && process.env.OPENSUBTITLES_PASSWORD)),
@@ -75,12 +74,24 @@ app.get("/health", (req, res) => res.json({
   requestId: crypto.randomUUID()
 }));
 
+app.get(["/debug/subtitles/:type/:id.json", "/:config/debug/subtitles/:type/:id.json"], async (req, res) => {
+  try {
+    const config = decodeConfig(req.params.config);
+    const extra = parseExtra("", req.query);
+    const lookup = describeLookup({ type: req.params.type, id: req.params.id, extra, config });
+    return res.json({ ok: true, lookup, exampleRequest: req.originalUrl });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 async function subtitleHandler(req, res) {
   try {
     const config = decodeConfig(req.params.config);
     const extra = parseExtra(req.params.extra, req.query);
     const subtitles = await listTranslationOptions({ req, config, type: req.params.type, id: req.params.id, extra });
-    res.setHeader("Cache-Control", "public, max-age=900, stale-while-revalidate=3600");
+    console.log("[subtitles]", { type: req.params.type, id: req.params.id, extra, count: subtitles.length });
+    res.setHeader("Cache-Control", "no-store");
     return res.json({ subtitles });
   } catch (error) {
     console.error("[subtitles]", error);

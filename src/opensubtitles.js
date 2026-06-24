@@ -18,7 +18,7 @@ function required(name) {
 function headers(withAuth = false) {
   const result = {
     "Api-Key": required("OPENSUBTITLES_API_KEY"),
-    "User-Agent": process.env.OPENSUBTITLES_USER_AGENT || "SKCZAITranslator v1.0.0",
+    "User-Agent": process.env.OPENSUBTITLES_USER_AGENT || "SKCZAITranslator v1.0.3",
     Accept: "application/json"
   };
   if (withAuth && authToken) result.Authorization = `Bearer ${authToken}`;
@@ -66,9 +66,9 @@ function scoreResult(entry, videoHash) {
   return score;
 }
 
-export async function searchSubtitles({ type, imdbId, season, episode, videoHash, sources, maxCandidates }) {
+export async function searchSubtitles({ type, imdbId, season, episode, videoHash, videoSize, query, sources = ["en"], maxCandidates = 2 }) {
   const ttl = Math.max(1, Number(process.env.SEARCH_CACHE_TTL_MINUTES || 60)) * 60 * 1000;
-  const cacheKey = JSON.stringify({ type, imdbId, season, episode, videoHash, sources, maxCandidates });
+  const cacheKey = JSON.stringify({ type, imdbId, season, episode, videoHash, videoSize, query, sources, maxCandidates });
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.at < ttl) return cached.value;
 
@@ -78,7 +78,9 @@ export async function searchSubtitles({ type, imdbId, season, episode, videoHash
   params.set("order_by", "download_count");
   params.set("order_direction", "desc");
   if (videoHash) params.set("moviehash", videoHash);
-  if (imdbId) params.set("imdb_id", imdbId);
+  if (videoSize) params.set("moviebytesize", String(videoSize));
+  if (imdbId) params.set("imdb_id", String(imdbId).replace(/^tt/i, ""));
+  if (!imdbId && query) params.set("query", query);
   if (type === "series" && season) params.set("season_number", String(season));
   if (type === "series" && episode) params.set("episode_number", String(episode));
 
