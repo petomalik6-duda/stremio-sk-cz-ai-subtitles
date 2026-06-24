@@ -24,7 +24,7 @@
 2. Runtime: Node.
 3. Build command:
    ```text
-   npm ci
+   npm ci --no-audit --no-fund
    ```
 4. Start command:
    ```text

@@ -3,7 +3,7 @@ services:
     name: stremio-sk-cz-ai-subtitles
     runtime: node
     plan: free
-    buildCommand: npm ci
+    buildCommand: npm ci --no-audit --no-fund
     startCommand: npm start
     healthCheckPath: /health
     envVars:

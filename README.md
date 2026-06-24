@@ -27,7 +27,7 @@ OpenSubtitles obmedzuje počet stiahnutí za 24 hodín. Cache znižuje spotrebu.
 ```bash
 cp .env.example .env
 # vyplň premenné a exportuj ich, alebo použi svoj env loader
-npm ci
+npm ci --no-audit --no-fund
 npm test
 npm start
 ```
@@ -38,7 +38,7 @@ Otvor `http://localhost:7000/configure`.
 
 1. Nahraj projekt na GitHub.
 2. V Renderi vytvor Web Service z repozitára alebo použi `render.yaml`.
-3. Build command: `npm ci`
+3. Build command: `npm ci --no-audit --no-fund`
 4. Start command: `npm start`
 5. Nastav environment variables podľa `.env.example`.
 6. Otvor `https://tvoja-sluzba.onrender.com/configure`.
