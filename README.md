@@ -1,35 +1,49 @@
-# SK/CZ AI titulky pre Stremio 1.0.7
+# SK/CZ DeepL titulky pre Stremio 1.1.0
 
-Samostatný Stremio addon pre online preklad titulkov do slovenčiny a češtiny. Zdrojové titulky vyhľadáva cez OpenSubtitles a prekladá cez Gemini.
+Samostatný Stremio addon, ktorý nájde zdrojové titulky cez OpenSubtitles a online ich preloží do slovenčiny alebo češtiny cez DeepL API.
 
-## Ako funguje
+## Ako preklad funguje
 
-1. Stremio požiada addon o titulkové stopy.
-2. Addon okamžite spustí preklad najlepšej zdrojovej varianty.
-3. Počas spracovania môže zobraziť informačný SRT titulok.
-4. Po 20–60 sekundách znovu otvor menu titulkov a vyber rovnaký jazyk.
-5. Stremio dostane novú `ready` URL a načíta hotový SRT preklad.
-6. Ďalšie prehratie použije cache.
+1. Stremio požiada addon o titulky pre film alebo epizódu.
+2. Addon nájde anglický, nemecký alebo iný zvolený zdroj na OpenSubtitles.
+3. DeepL ako prvú voľbu preloží priamo celý SRT dokument a zachová časovanie.
+4. Pri príliš veľkom alebo nekompatibilnom SRT sa použije textový dávkový fallback.
+5. Hotový SRT sa uloží do cache.
 
-## Render
+Pri prvom otvorení sa môže zobraziť informačná stopa. Po dokončení znovu otvor menu titulkov a vyber rovnaký jazyk.
 
-Build command:
+## Povinné Render premenné
 
-`npm ci --no-audit --no-fund`
+```env
+DEEPL_API_KEY=tvoj_deepl_api_kluc
+OPENSUBTITLES_API_KEY=tvoj_opensubtitles_api_kluc
+OPENSUBTITLES_USERNAME=tvoje_meno
+OPENSUBTITLES_PASSWORD=tvoje_heslo
+TOKEN_SECRET=nahodny_retazec_aspon_24_znakov
+PUBLIC_URL=https://tvoj-addon.onrender.com
+```
 
-Start command:
+Odporúčané:
 
-`npm start`
+```env
+DEEPL_API_PLAN=auto
+DEEPL_TRANSLATION_MODE=document
+DEEPL_TEXT_FALLBACK=true
+DEEPL_MODEL_TYPE=prefer_quality_optimized
+DEEPL_RETRIES=4
+DEEPL_CONCURRENCY=1
+```
 
-Povinné premenné:
+`DEEPL_API_PLAN=auto` rozpozná Free kľúč podľa koncovky `:fx`. Pri Pro kľúči použije Pro endpoint.
 
-- `GEMINI_API_KEY`
-- `OPENSUBTITLES_API_KEY`
-- `OPENSUBTITLES_USERNAME`
-- `OPENSUBTITLES_PASSWORD`
-- `TOKEN_SECRET`
-- `PUBLIC_URL`
+## Diagnostika
 
-Odporúčaný model:
+- `/health` – konfigurácia addonu
+- `/debug/deepl` – overenie DeepL kľúča a aktuálnej kvóty
+- `/debug/recent-requests` – posledné subtitle požiadavky zo Stremia
+- `/debug/job/JOB_ID` – stav konkrétneho prekladu
+- `/test.srt` – test zobrazenia SRT
 
-`GEMINI_MODEL=gemini-2.5-flash-lite`
+## Limity
+
+DeepL API Free obsahuje mesačný limit znakov. Preklad celého filmu môže spotrebovať desiatky tisíc znakov. Addon preto hotové preklady cacheuje.

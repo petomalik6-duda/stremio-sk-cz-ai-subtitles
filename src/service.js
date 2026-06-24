@@ -1,6 +1,6 @@
 import { searchSubtitles, downloadSubtitleText } from "./opensubtitles.js";
 import { parseSubtitle, toSrt } from "./subtitles.js";
-import { translateCues } from "./gemini.js";
+import { translateCues, translateSrtDocument } from "./deepl.js";
 import crypto from "node:crypto";
 import {
   readIfExists,
@@ -68,7 +68,7 @@ export function describeLookup({ type, id, extra, config }) {
 }
 
 function createJobId(lookup, target, candidateIndex, mediaId) {
-  const stable = JSON.stringify({ lookup, target, candidateIndex, mediaId, version: 4 });
+  const stable = JSON.stringify({ lookup, target, candidateIndex, mediaId, version: 5 });
   return crypto.createHmac("sha256", process.env.TOKEN_SECRET || "missing-secret")
     .update(stable)
     .digest("hex")
@@ -88,7 +88,7 @@ export async function listTranslationOptions({ req, config, type, id, extra }) {
         target,
         candidateIndex,
         mediaId: id,
-        version: 4,
+        version: 5,
         exp: Date.now() + Math.max(1, Number(process.env.SIGNED_URL_TTL_HOURS || 168)) * 60 * 60 * 1000
       };
       const jobId = createJobId(lookup, target, candidateIndex, id);
@@ -108,7 +108,7 @@ export async function listTranslationOptions({ req, config, type, id, extra }) {
         ? `ready-${state?.finishedAt || "disk"}`
         : `pending-${Math.floor(Date.now() / 15000)}`;
       subtitles.push({
-        id: `skcz-ai-${target}-${candidateIndex + 1}-${ready ? "ready" : "online"}-${crypto.createHash("sha1").update(String(id)).digest("hex").slice(0, 8)}`,
+        id: `skcz-deepl-${target}-${candidateIndex + 1}-${ready ? "ready" : "online"}-${crypto.createHash("sha1").update(String(id)).digest("hex").slice(0, 8)}`,
         lang: LANGUAGE_META[target].stremio,
         url: `${base}/t/${jobId}.srt?v=${encodeURIComponent(revision)}`
       });
@@ -135,9 +135,10 @@ async function resolveCandidate(payload) {
 
 export async function buildTranslatedSubtitle(payload) {
   const candidate = await resolveCandidate(payload);
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+  const mode = String(process.env.DEEPL_TRANSLATION_MODE || "document").trim().toLowerCase();
+  const providerRevision = `deepl:${mode}:${process.env.DEEPL_MODEL_TYPE || "prefer_quality_optimized"}`;
   const sourceLanguage = candidate.language || payload.source || "en";
-  const translationKey = [candidate.fileId, sourceLanguage, payload.target, model, "prompt-v3-srt"].join(":");
+  const translationKey = [candidate.fileId, sourceLanguage, payload.target, providerRevision, "deepl-srt-v1"].join(":");
   const targetFile = translatedPath(translationKey);
   const cached = await readIfExists(targetFile);
   if (cached) return { srt: cached, cached: true, cueCount: null, candidate };
@@ -152,10 +153,33 @@ export async function buildTranslatedSubtitle(payload) {
       await writeAtomic(sourceFile, original);
     }
     const cues = parseSubtitle(original);
-    const translated = await translateCues(cues, sourceLanguage, payload.target);
-    const srt = toSrt(translated);
+    const normalizedSrt = toSrt(cues);
+    let srt = null;
+    let method = "text";
+
+    if (mode !== "text") {
+      try {
+        srt = await translateSrtDocument(normalizedSrt, sourceLanguage, payload.target);
+        // Validate that DeepL returned a readable subtitle file. Normalize it once
+        // more to keep Stremio compatibility and UTF-8 BOM/comma timestamps.
+        const translatedDocumentCues = parseSubtitle(srt);
+        srt = toSrt(translatedDocumentCues);
+        method = "document";
+      } catch (error) {
+        const fallbackAllowed = String(process.env.DEEPL_TEXT_FALLBACK || "true").toLowerCase() !== "false";
+        if (!fallbackAllowed || [403, 456].includes(Number(error?.status))) throw error;
+        console.warn(`[deepl] dokumentový režim zlyhal, používam textový fallback: ${error.message}`);
+      }
+    }
+
+    if (!srt) {
+      const translated = await translateCues(cues, sourceLanguage, payload.target);
+      srt = toSrt(translated);
+      method = "text";
+    }
+
     await writeAtomic(targetFile, srt);
-    return { srt, cached: false, cueCount: translated.length, candidate };
+    return { srt, cached: false, cueCount: cues.length, candidate, method };
   });
 }
 
@@ -204,7 +228,8 @@ export function getTranslationJobState(jobId) {
     error: state.error,
     cached: state.result?.cached ?? null,
     cueCount: state.result?.cueCount ?? null,
-    fileId: state.result?.candidate?.fileId ?? null
+    fileId: state.result?.candidate?.fileId ?? null,
+    method: state.result?.method ?? null
   };
 }
 

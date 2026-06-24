@@ -4,6 +4,7 @@ import { encodeConfig, decodeConfig, LANGUAGE_META } from "../src/config.js";
 import { parseMediaId, parseExtra } from "../src/media.js";
 import { parseSubtitle, toWebVtt, toSrt, chunkCues, protectFormatting, restoreFormatting } from "../src/subtitles.js";
 import { signPayload, verifyPayload } from "../src/token.js";
+import { resolveDeepLBaseUrl, toDeepLSource, toDeepLTarget, translateCues, translateSrtDocument } from "../src/deepl.js";
 
 process.env.TOKEN_SECRET = "this-is-a-long-test-secret-1234567890";
 
@@ -81,4 +82,82 @@ test("SRT output uses comma timestamps and UTF-8 BOM", () => {
   assert.equal(srt.charCodeAt(0), 0xFEFF);
   assert.match(srt, /00:00:01,000 --> 00:00:03,000/);
   assert.match(srt, /Ahoj/);
+});
+
+
+test("DeepL endpoint auto-detection and language mapping", () => {
+  assert.equal(resolveDeepLBaseUrl("abc:fx", "auto"), "https://api-free.deepl.com");
+  assert.equal(resolveDeepLBaseUrl("abc", "auto"), "https://api.deepl.com");
+  assert.equal(resolveDeepLBaseUrl("abc", "free"), "https://api-free.deepl.com");
+  assert.equal(toDeepLSource("eng"), "EN");
+  assert.equal(toDeepLSource("de"), "DE");
+  assert.equal(toDeepLTarget("sk"), "SK");
+  assert.equal(toDeepLTarget("cs"), "CS");
+});
+
+test("DeepL text fallback preserves cue order", async () => {
+  const previousFetch = global.fetch;
+  const previousKey = process.env.DEEPL_API_KEY;
+  const previousPlan = process.env.DEEPL_API_PLAN;
+  process.env.DEEPL_API_KEY = "test-key:fx";
+  process.env.DEEPL_API_PLAN = "free";
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      translations: body.text.map((text) => ({ text: `SK:${text}` }))
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await translateCues([
+      { start: "00:00:01.000", end: "00:00:02.000", text: "Hello" },
+      { start: "00:00:03.000", end: "00:00:04.000", text: "World" }
+    ], "en", "sk");
+    assert.deepEqual(result.map((cue) => cue.text), ["SK:Hello", "SK:World"]);
+  } finally {
+    global.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.DEEPL_API_KEY; else process.env.DEEPL_API_KEY = previousKey;
+    if (previousPlan === undefined) delete process.env.DEEPL_API_PLAN; else process.env.DEEPL_API_PLAN = previousPlan;
+  }
+});
+
+test("DeepL SRT document workflow uploads, polls, and downloads", async () => {
+  const previousFetch = global.fetch;
+  const previousKey = process.env.DEEPL_API_KEY;
+  const previousPlan = process.env.DEEPL_API_PLAN;
+  process.env.DEEPL_API_KEY = "test-key:fx";
+  process.env.DEEPL_API_PLAN = "free";
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push(String(url));
+    if (String(url).endsWith("/v2/document")) {
+      assert.equal(options.method, "POST");
+      assert.ok(options.body instanceof FormData);
+      return new Response(JSON.stringify({ document_id: "doc-1", document_key: "key-1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }
+    if (String(url).endsWith("/v2/document/doc-1")) {
+      return new Response(JSON.stringify({ document_id: "doc-1", status: "done", billed_characters: 5 }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }
+    if (String(url).endsWith("/v2/document/doc-1/result")) {
+      return new Response("1\r\n00:00:01,000 --> 00:00:02,000\r\nAhoj\r\n", {
+        status: 200,
+        headers: { "content-type": "application/x-subrip" }
+      });
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  try {
+    const result = await translateSrtDocument("1\r\n00:00:01,000 --> 00:00:02,000\r\nHello\r\n", "en", "sk");
+    assert.match(result, /Ahoj/);
+    assert.equal(calls.length, 3);
+  } finally {
+    global.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.DEEPL_API_KEY; else process.env.DEEPL_API_KEY = previousKey;
+    if (previousPlan === undefined) delete process.env.DEEPL_API_PLAN; else process.env.DEEPL_API_PLAN = previousPlan;
+  }
 });

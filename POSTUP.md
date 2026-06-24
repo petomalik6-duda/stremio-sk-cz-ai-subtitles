@@ -1,93 +1,80 @@
-# Presný postup nasadenia
+# Nasadenie SK/CZ DeepL titulkov 1.1.0
 
-## 1. OpenSubtitles
+## 1. DeepL API kľúč
 
-1. Vytvor si účet na OpenSubtitles.com.
-2. V profile otvor **API Consumers** a vytvor API consumer.
-3. Skopíruj API key.
-4. Priprav si používateľské meno a heslo OpenSubtitles. Prihlásený účet má vyšší limit sťahovania než anonymný prístup.
+V účte DeepL otvor sekciu API Keys a vytvor kľúč pre DeepL API Free alebo Pro. Free kľúč má zvyčajne koncovku `:fx`.
 
-## 2. Gemini
+## 2. OpenSubtitles
 
-1. V Google AI Studio vytvor Gemini API key.
-2. Kľúč nikam nevkladaj do GitHub súborov.
+V OpenSubtitles.com vytvor API Consumer a skopíruj API Key. Prihlasovacie meno a heslo pridaj kvôli vyššej kvóte sťahovania titulkov.
 
 ## 3. GitHub
 
-1. Vytvor nový prázdny repozitár.
-2. Nahraj doň celý obsah ZIP balíka.
-3. Priečinok `node_modules` nenahrávaj.
+Rozbaľ ZIP a nahraj celý obsah do repozitára. Dôležité je prepísať aj celý priečinok `src` a súbory `package.json` a `package-lock.json`.
 
 ## 4. Render
 
-1. **New → Web Service** a vyber GitHub repozitár.
-2. Runtime: Node.
-3. Build command:
-   ```text
-   npm ci --no-audit --no-fund
-   ```
-4. Start command:
-   ```text
-   npm start
-   ```
-5. V Environment pridaj:
+Použi:
 
-   ```text
-   GEMINI_API_KEY=...
-   OPENSUBTITLES_API_KEY=...
-   OPENSUBTITLES_USERNAME=...
-   OPENSUBTITLES_PASSWORD=...
-   TOKEN_SECRET=dlhy-nahodny-retazec-aspon-24-znakov
-   GEMINI_MODEL=gemini-2.5-flash-lite
-   CACHE_DIR=./data/cache
-   ```
+```text
+Build Command: npm ci --no-audit --no-fund
+Start Command: npm start
+```
 
-6. Deployni službu.
+Nastav:
 
-## 5. Inštalácia do Stremia
+```env
+DEEPL_API_KEY=...
+DEEPL_API_PLAN=auto
+DEEPL_TRANSLATION_MODE=document
+DEEPL_TEXT_FALLBACK=true
+DEEPL_MODEL_TYPE=prefer_quality_optimized
+DEEPL_RETRIES=4
+DEEPL_CONCURRENCY=1
 
-1. Otvor:
-   ```text
-   https://NAZOV-SLUZBY.onrender.com/configure
-   ```
-2. Vyber slovenčinu, češtinu alebo oba jazyky.
-3. Klikni **Vytvoriť inštalačný odkaz**.
-4. Klikni **Otvoriť v Stremio**.
+OPENSUBTITLES_API_KEY=...
+OPENSUBTITLES_USERNAME=...
+OPENSUBTITLES_PASSWORD=...
+TOKEN_SECRET=dlhy_nahodny_retazec
+PUBLIC_URL=https://tvoj-addon.onrender.com
+```
 
-## 6. Použitie
+Premennú `GEMINI_API_KEY` môžeš odstrániť; verzia 1.1.0 ju nepoužíva.
 
-Pri filme alebo epizóde otvor ponuku titulkov. Mali by sa ukázať slovenské a/alebo české AI titulky. Po prvom výbere addon online stiahne zdrojové titulky a preloží ich. Prvé načítanie môže trvať dlhšie. Druhé použitie toho istého prekladu pôjde z cache.
+Spusti `Manual Deploy → Clear build cache & deploy`.
 
-## 7. Overenie
+## 5. Overenie
 
 Otvor:
 
 ```text
-https://NAZOV-SLUZBY.onrender.com/health
+https://tvoj-addon.onrender.com/health
 ```
 
-Všetky potrebné hodnoty by mali byť `true`, okrem autentifikácie OpenSubtitles, ak zámerne používaš anonymný limit.
+Musí obsahovať:
 
-## 8. Trvalá cache
+```json
+{
+  "version": "1.1.0",
+  "provider": "deepl",
+  "deeplConfigured": true
+}
+```
 
-Na bezplatnom Render pláne môže cache po redeployi zmiznúť. S Persistent Disk nastav:
+Potom otvor:
 
 ```text
-CACHE_DIR=/var/data/subtitle-cache
+https://tvoj-addon.onrender.com/debug/deepl
 ```
 
-Bez persistentného disku addon stále funguje, ale po deployi môže rovnaké titulky znovu stiahnuť a preložiť.
+Pri správnom kľúči bude `ok: true` a zobrazí sa spotreba/limit znakov. API kľúč sa vo výstupe nezobrazuje.
 
+## 6. Stremio
 
-## Použitie verzie 1.0.5
+1. Odinštaluj všetky staré Gemini verzie SK/CZ addonu.
+2. Úplne reštartuj Stremio.
+3. Otvor `https://tvoj-addon.onrender.com/configure`.
+4. Vyber jazyky a vytvor nový inštalačný odkaz.
+5. Nainštaluj addon `SK/CZ DeepL titulky v1.1.0`.
 
-1. Spusť film alebo epizódu.
-2. Vyber Slovak/Czech AI titulky.
-3. Zobrazí sa informácia, že online preklad prebieha.
-4. Po 30–60 sekundách otvor menu titulkov a vyber rovnakú stopu znova.
-5. Hotový preklad sa načíta a uloží do cache.
-
-
-## Použitie verzie 1.0.7
-
-Verzia 1.0.7 používa SRT. Preklad sa začne už po načítaní titulkov. Po 20–60 sekundách znovu otvor menu titulkov a vyber rovnaký jazyk; tým Stremio načíta novú `ready` URL namiesto starej informačnej odpovede.
+Pri prvom filme počkaj na dokončenie prekladu a potom znovu otvor menu titulkov.

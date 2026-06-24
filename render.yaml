@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: stremio-sk-cz-ai-subtitles
+    name: stremio-sk-cz-deepl-subtitles
     runtime: node
     plan: free
     buildCommand: npm ci --no-audit --no-fund
@@ -11,11 +11,21 @@ services:
         value: 20
       - key: CACHE_DIR
         value: ./data/cache
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash-lite
+      - key: DEEPL_API_PLAN
+        value: auto
+      - key: DEEPL_TRANSLATION_MODE
+        value: document
+      - key: DEEPL_TEXT_FALLBACK
+        value: true
+      - key: DEEPL_MODEL_TYPE
+        value: prefer_quality_optimized
+      - key: DEEPL_RETRIES
+        value: 4
+      - key: DEEPL_CONCURRENCY
+        value: 1
       - key: TOKEN_SECRET
         generateValue: true
-      - key: GEMINI_API_KEY
+      - key: DEEPL_API_KEY
         sync: false
       - key: OPENSUBTITLES_API_KEY
         sync: false
