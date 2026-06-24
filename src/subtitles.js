@@ -71,6 +71,16 @@ export function toWebVtt(cues) {
   return `WEBVTT\n\n${blocks.join("\n\n")}\n`;
 }
 
+
+export function toSrt(cues) {
+  const blocks = cues.map((cue, index) => {
+    const start = String(cue.start).replace(/\./g, ",");
+    const end = String(cue.end).replace(/\./g, ",");
+    return `${index + 1}\r\n${start} --> ${end}\r\n${cue.text}`;
+  });
+  return `\uFEFF${blocks.join("\r\n\r\n")}\r\n`;
+}
+
 export function protectFormatting(text) {
   const tokens = [];
   const protectedText = String(text).replace(/<[^>]+>|\{\\[^}]+\}/g, (match) => {

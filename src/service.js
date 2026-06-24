@@ -1,13 +1,19 @@
 import { searchSubtitles, downloadSubtitleText } from "./opensubtitles.js";
-import { parseSubtitle, toWebVtt } from "./subtitles.js";
+import { parseSubtitle, toSrt } from "./subtitles.js";
 import { translateCues } from "./gemini.js";
 import crypto from "node:crypto";
-import { readIfExists, writeAtomic, sourcePath, translatedPath, writeJob } from "./cache.js";
+import {
+  readIfExists,
+  writeAtomic,
+  sourcePath,
+  translatedPath,
+  writeJob,
+  jobOutputPath
+} from "./cache.js";
 import { LANGUAGE_META } from "./config.js";
 import { parseMediaId } from "./media.js";
 
 const inFlight = new Map();
-
 const translationJobs = new Map();
 
 function pruneTranslationJobs() {
@@ -17,7 +23,6 @@ function pruneTranslationJobs() {
     if (timestamp < cutoff) translationJobs.delete(jobId);
   }
 }
-
 setInterval(pruneTranslationJobs, 30 * 60 * 1000).unref();
 
 async function once(key, worker) {
@@ -62,14 +67,20 @@ export function describeLookup({ type, id, extra, config }) {
   };
 }
 
+function createJobId(lookup, target, candidateIndex, mediaId) {
+  const stable = JSON.stringify({ lookup, target, candidateIndex, mediaId, version: 4 });
+  return crypto.createHmac("sha256", process.env.TOKEN_SECRET || "missing-secret")
+    .update(stable)
+    .digest("hex")
+    .slice(0, 32);
+}
+
 export async function listTranslationOptions({ req, config, type, id, extra }) {
   const media = parseMediaId(type, id, extra);
   const base = publicBase(req);
   const subtitles = [];
   const lookup = compactLookup(media, type, config.sources, config.maxCandidates);
 
-  // Keep URLs short for Android TV / Google TV clients. The full lookup payload is
-  // stored server-side and addressed by a compact job id.
   for (const target of config.targets) {
     for (let candidateIndex = 0; candidateIndex < config.maxCandidates; candidateIndex += 1) {
       const payload = {
@@ -77,19 +88,29 @@ export async function listTranslationOptions({ req, config, type, id, extra }) {
         target,
         candidateIndex,
         mediaId: id,
-        version: 3,
+        version: 4,
         exp: Date.now() + Math.max(1, Number(process.env.SIGNED_URL_TTL_HOURS || 168)) * 60 * 60 * 1000
       };
-      const stable = JSON.stringify({ lookup, target, candidateIndex, mediaId: id, version: 3 });
-      const jobId = crypto.createHmac("sha256", process.env.TOKEN_SECRET || "missing-secret")
-        .update(stable)
-        .digest("hex")
-        .slice(0, 32);
+      const jobId = createJobId(lookup, target, candidateIndex, id);
       await writeJob(jobId, payload);
+
+      const output = await readIfExists(jobOutputPath(jobId));
+      const state = getTranslationJobState(jobId);
+      const ready = Boolean(output || state?.status === "done");
+
+      // Start the preferred source variant before the user selects it. This makes
+      // the first visible result much faster without translating every fallback.
+      if (candidateIndex === 0 && !ready && hasLookupClue(media)) {
+        startTranslationJob(jobId, payload);
+      }
+
+      const revision = ready
+        ? `ready-${state?.finishedAt || "disk"}`
+        : `pending-${Math.floor(Date.now() / 15000)}`;
       subtitles.push({
-        id: `skcz-ai-${target}-${candidateIndex + 1}-${crypto.createHash("sha1").update(String(id)).digest("hex").slice(0, 10)}`,
+        id: `skcz-ai-${target}-${candidateIndex + 1}-${ready ? "ready" : "online"}-${crypto.createHash("sha1").update(String(id)).digest("hex").slice(0, 8)}`,
         lang: LANGUAGE_META[target].stremio,
-        url: `${base}/t/${jobId}.vtt`
+        url: `${base}/t/${jobId}.srt?v=${encodeURIComponent(revision)}`
       });
     }
   }
@@ -104,14 +125,11 @@ async function resolveCandidate(payload) {
       fileName: payload.fileName || `subtitle-${payload.fileId}.srt`
     };
   }
-
   const lookup = payload.lookup || {};
   const candidates = await searchSubtitles(lookup);
   const index = Math.max(0, Number(payload.candidateIndex || 0));
   const candidate = candidates[index] || candidates[0];
-  if (!candidate) {
-    throw new Error("OpenSubtitles nenašlo vhodné zdrojové titulky pre toto video.");
-  }
+  if (!candidate) throw new Error("OpenSubtitles nenašlo vhodné zdrojové titulky pre toto video.");
   return candidate;
 }
 
@@ -119,14 +137,14 @@ export async function buildTranslatedSubtitle(payload) {
   const candidate = await resolveCandidate(payload);
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
   const sourceLanguage = candidate.language || payload.source || "en";
-  const translationKey = [candidate.fileId, sourceLanguage, payload.target, model, "prompt-v2"].join(":");
+  const translationKey = [candidate.fileId, sourceLanguage, payload.target, model, "prompt-v3-srt"].join(":");
   const targetFile = translatedPath(translationKey);
   const cached = await readIfExists(targetFile);
-  if (cached) return { vtt: cached, cached: true };
+  if (cached) return { srt: cached, cached: true, cueCount: null, candidate };
 
   return once(translationKey, async () => {
     const secondCheck = await readIfExists(targetFile);
-    if (secondCheck) return { vtt: secondCheck, cached: true };
+    if (secondCheck) return { srt: secondCheck, cached: true, cueCount: null, candidate };
     const sourceFile = sourcePath(candidate.fileId);
     let original = await readIfExists(sourceFile);
     if (!original) {
@@ -134,14 +152,12 @@ export async function buildTranslatedSubtitle(payload) {
       await writeAtomic(sourceFile, original);
     }
     const cues = parseSubtitle(original);
-    if (!cues.length) throw new Error("Zdrojový titulkový súbor neobsahuje žiadne čitateľné repliky.");
     const translated = await translateCues(cues, sourceLanguage, payload.target);
-    const vtt = toWebVtt(translated);
-    await writeAtomic(targetFile, vtt);
-    return { vtt, cached: false };
+    const srt = toSrt(translated);
+    await writeAtomic(targetFile, srt);
+    return { srt, cached: false, cueCount: translated.length, candidate };
   });
 }
-
 
 export function startTranslationJob(jobId, payload) {
   const existing = translationJobs.get(jobId);
@@ -158,7 +174,8 @@ export function startTranslationJob(jobId, payload) {
   };
 
   state.promise = buildTranslatedSubtitle(payload)
-    .then((result) => {
+    .then(async (result) => {
+      await writeAtomic(jobOutputPath(jobId), result.srt);
       state.status = "done";
       state.finishedAt = Date.now();
       state.result = result;
@@ -171,8 +188,6 @@ export function startTranslationJob(jobId, payload) {
       throw error;
     });
 
-  // Prevent an unhandled rejection when the HTTP request has already returned
-  // the loading subtitle while translation continues in the background.
   state.promise.catch(() => {});
   translationJobs.set(jobId, state);
   return state;
@@ -187,11 +202,21 @@ export function getTranslationJobState(jobId) {
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
     error: state.error,
-    cached: state.result?.cached ?? null
+    cached: state.result?.cached ?? null,
+    cueCount: state.result?.cueCount ?? null,
+    fileId: state.result?.candidate?.fileId ?? null
   };
 }
 
-export async function waitForTranslationJob(state, timeoutMs = 2500) {
+export async function getReadyJobOutput(jobId) {
+  const state = translationJobs.get(jobId);
+  if (state?.status === "done" && state.result?.srt) return state.result;
+  const disk = await readIfExists(jobOutputPath(jobId));
+  if (disk) return { srt: disk, cached: true, cueCount: null };
+  return null;
+}
+
+export async function waitForTranslationJob(state, timeoutMs = 12000) {
   if (!state) return null;
   if (state.status === "done") return state.result;
   if (state.status === "error") throw new Error(state.error || "Preklad zlyhal");

@@ -6,11 +6,15 @@ const ROOT = path.resolve(process.env.CACHE_DIR || "./data/cache");
 const SOURCE_DIR = path.join(ROOT, "source");
 const TRANSLATED_DIR = path.join(ROOT, "translated");
 const JOB_DIR = path.join(ROOT, "jobs");
+const JOB_OUTPUT_DIR = path.join(ROOT, "job-output");
 
 export async function ensureCacheDirs() {
-  await fs.mkdir(SOURCE_DIR, { recursive: true });
-  await fs.mkdir(TRANSLATED_DIR, { recursive: true });
-  await fs.mkdir(JOB_DIR, { recursive: true });
+  await Promise.all([
+    fs.mkdir(SOURCE_DIR, { recursive: true }),
+    fs.mkdir(TRANSLATED_DIR, { recursive: true }),
+    fs.mkdir(JOB_DIR, { recursive: true }),
+    fs.mkdir(JOB_OUTPUT_DIR, { recursive: true })
+  ]);
 }
 
 export function cacheKey(input) {
@@ -22,11 +26,15 @@ export function sourcePath(fileId) {
 }
 
 export function translatedPath(key) {
-  return path.join(TRANSLATED_DIR, `${cacheKey(key)}.vtt`);
+  return path.join(TRANSLATED_DIR, `${cacheKey(key)}.srt`);
 }
 
 export function jobPath(jobId) {
   return path.join(JOB_DIR, `${String(jobId).replace(/[^a-f0-9]/gi, "")}.json`);
+}
+
+export function jobOutputPath(jobId) {
+  return path.join(JOB_OUTPUT_DIR, `${String(jobId).replace(/[^a-f0-9]/gi, "")}.srt`);
 }
 
 export async function writeJob(jobId, payload) {
@@ -58,7 +66,7 @@ export async function writeAtomic(file, content) {
 export async function cleanupCache() {
   const maxAgeDays = Math.max(1, Number(process.env.CACHE_MAX_AGE_DAYS || 30));
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-  for (const dir of [SOURCE_DIR, TRANSLATED_DIR, JOB_DIR]) {
+  for (const dir of [SOURCE_DIR, TRANSLATED_DIR, JOB_DIR, JOB_OUTPUT_DIR]) {
     let entries = [];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { encodeConfig, decodeConfig, LANGUAGE_META } from "../src/config.js";
 import { parseMediaId, parseExtra } from "../src/media.js";
-import { parseSubtitle, toWebVtt, chunkCues, protectFormatting, restoreFormatting } from "../src/subtitles.js";
+import { parseSubtitle, toWebVtt, toSrt, chunkCues, protectFormatting, restoreFormatting } from "../src/subtitles.js";
 import { signPayload, verifyPayload } from "../src/token.js";
 
 process.env.TOKEN_SECRET = "this-is-a-long-test-secret-1234567890";
@@ -72,4 +72,13 @@ test("filename fallback query", () => {
 test("Stremio legacy ISO 639-2 language codes", () => {
   assert.equal(LANGUAGE_META.sk.stremio, "slo");
   assert.equal(LANGUAGE_META.cs.stremio, "cze");
+});
+
+
+test("SRT output uses comma timestamps and UTF-8 BOM", () => {
+  const cues = parseSubtitle("1\n00:00:01,000 --> 00:00:03,000\nAhoj");
+  const srt = toSrt(cues);
+  assert.equal(srt.charCodeAt(0), 0xFEFF);
+  assert.match(srt, /00:00:01,000 --> 00:00:03,000/);
+  assert.match(srt, /Ahoj/);
 });

@@ -88,6 +88,6 @@ Bez persistentného disku addon stále funguje, ale po deployi môže rovnaké t
 5. Hotový preklad sa načíta a uloží do cache.
 
 
-## Použitie verzie 1.0.6
+## Použitie verzie 1.0.7
 
-Verzia 1.0.6 používa SRT. Preklad sa začne už po načítaní titulkov. Po 20–60 sekundách znovu otvor menu titulkov a vyber rovnaký jazyk; tým Stremio načíta novú `ready` URL namiesto starej informačnej odpovede.
+Verzia 1.0.7 používa SRT. Preklad sa začne už po načítaní titulkov. Po 20–60 sekundách znovu otvor menu titulkov a vyber rovnaký jazyk; tým Stremio načíta novú `ready` URL namiesto starej informačnej odpovede.

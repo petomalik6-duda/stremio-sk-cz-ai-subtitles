@@ -3,16 +3,33 @@ import crypto from "node:crypto";
 import { decodeConfig, encodeConfig, normalizeConfig } from "./src/config.js";
 import { parseExtra } from "./src/media.js";
 import { verifyPayload } from "./src/token.js";
-import { ensureCacheDirs, cleanupCache, readJob } from "./src/cache.js";
 import {
+  ensureCacheDirs,
+  cleanupCache,
+  readJob,
+  readIfExists,
+  jobOutputPath
+} from "./src/cache.js";
+import * as subtitleService from "./src/service.js";
+
+const {
   listTranslationOptions,
   buildTranslatedSubtitle,
   describeLookup,
   startTranslationJob,
   getTranslationJobState,
-  getReadyJobOutput,
   waitForTranslationJob
-} from "./src/service.js";
+} = subtitleService;
+
+// Compatibility fallback: older deployments may still have a service.js that
+// does not export getReadyJobOutput. Namespace import keeps the server bootable.
+async function getReadyJobOutput(jobId) {
+  if (typeof subtitleService.getReadyJobOutput === "function") {
+    return subtitleService.getReadyJobOutput(jobId);
+  }
+  const srt = await readIfExists(jobOutputPath(jobId));
+  return srt ? { srt, cached: true, cueCount: null } : null;
+}
 
 const app = express();
 const PORT = Number(process.env.PORT || 7000);
@@ -52,9 +69,9 @@ function manifest(configToken) {
   const config = decodeConfig(configToken);
   const targetLabel = config.targets.map((value) => value.toUpperCase()).join("+");
   return {
-    id: "com.petomalik.stremio.skcz.ai.subtitles.v106",
-    version: "1.0.6",
-    name: `SK/CZ AI titulky v1.0.6 (${targetLabel})`,
+    id: "com.petomalik.stremio.skcz.ai.subtitles.v107",
+    version: "1.0.7",
+    name: `SK/CZ AI titulky v1.0.7 (${targetLabel})`,
     description: "Online preklad titulkov do slovenčiny a češtiny cez OpenSubtitles a Gemini.",
     resources: [{ name: "subtitles", types: ["movie", "series"] }],
     types: ["movie", "series"],
@@ -97,7 +114,7 @@ app.get("/manifest.json", (req, res) => { res.setHeader("Cache-Control", "no-sto
 app.get("/:config/manifest.json", (req, res) => { res.setHeader("Cache-Control", "no-store"); res.json(manifest(req.params.config)); });
 app.get("/health", (req, res) => res.json({
   ok: true,
-  version: "1.0.6",
+  version: "1.0.7",
   geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
   openSubtitlesConfigured: Boolean(process.env.OPENSUBTITLES_API_KEY),
   openSubtitlesAuthenticated: Boolean(process.env.OPENSUBTITLES_TOKEN || (process.env.OPENSUBTITLES_USERNAME && process.env.OPENSUBTITLES_PASSWORD)),
@@ -111,13 +128,13 @@ app.get(["/debug/subtitles/:type/:id.json", "/:config/debug/subtitles/:type/:id.
     const config = decodeConfig(req.params.config);
     const extra = parseExtra("", req.query);
     const lookup = describeLookup({ type: req.params.type, id: req.params.id, extra, config });
-    return res.json({ ok: true, version: "1.0.6", lookup, exampleRequest: req.originalUrl });
+    return res.json({ ok: true, version: "1.0.7", lookup, exampleRequest: req.originalUrl });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
   }
 });
 
-app.get("/debug/recent-requests", (req, res) => res.json({ ok: true, version: "1.0.6", requests: recentSubtitleRequests }));
+app.get("/debug/recent-requests", (req, res) => res.json({ ok: true, version: "1.0.7", requests: recentSubtitleRequests }));
 app.get("/test.srt", (req, res) => {
   res.setHeader("Content-Type", "application/x-subrip; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
@@ -154,7 +171,7 @@ app.get("/debug/job/:jobId", async (req, res) => {
   const payload = await readJob(req.params.jobId);
   const ready = await getReadyJobOutput(req.params.jobId);
   const state = getTranslationJobState(req.params.jobId);
-  return res.json({ ok: true, version: "1.0.6", payload, state, ready: Boolean(ready?.srt), bytes: ready?.srt?.length || 0 });
+  return res.json({ ok: true, version: "1.0.7", payload, state, ready: Boolean(ready?.srt), bytes: ready?.srt?.length || 0 });
 });
 
 async function translatedSrtHandler(req, res) {
@@ -219,4 +236,4 @@ app.get("/translated/:token.srt", async (req, res) => {
 await ensureCacheDirs();
 await cleanupCache().catch((error) => console.warn("Cache cleanup failed:", error.message));
 setInterval(() => cleanupCache().catch(() => {}), 24 * 60 * 60 * 1000).unref();
-app.listen(PORT, () => console.log(`SK/CZ AI subtitle addon v1.0.6 listening on port ${PORT}`));
+app.listen(PORT, () => console.log(`SK/CZ AI subtitle addon v1.0.7 listening on port ${PORT}`));

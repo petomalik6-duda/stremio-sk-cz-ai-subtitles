@@ -1,4 +1,4 @@
-# SK/CZ AI titulky pre Stremio 1.0.6
+# SK/CZ AI titulky pre Stremio 1.0.7
 
 Samostatný Stremio addon pre online preklad titulkov do slovenčiny a češtiny. Zdrojové titulky vyhľadáva cez OpenSubtitles a prekladá cez Gemini.
 
