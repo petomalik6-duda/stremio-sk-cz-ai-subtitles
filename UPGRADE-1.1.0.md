@@ -1,4 +1,4 @@
-# Upgrade na 1.1.0 – DeepL
+# Upgrade na 1.1.1 – DeepL
 
 - Gemini bol úplne odstránený z prekladovej vrstvy.
 - Hlavný režim prekladá celý SRT dokument cez DeepL Document API.

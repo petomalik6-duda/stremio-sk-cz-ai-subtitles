@@ -18,7 +18,7 @@ function required(name) {
 function headers(withAuth = false) {
   const result = {
     "Api-Key": required("OPENSUBTITLES_API_KEY"),
-    "User-Agent": process.env.OPENSUBTITLES_USER_AGENT || "SKCZDeepLTranslator v1.1.0",
+    "User-Agent": process.env.OPENSUBTITLES_USER_AGENT || "SKCZDeepLTranslator v1.1.1",
     Accept: "application/json"
   };
   if (withAuth && authToken) result.Authorization = `Bearer ${authToken}`;

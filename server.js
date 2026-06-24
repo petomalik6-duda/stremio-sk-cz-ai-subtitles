@@ -70,9 +70,9 @@ function manifest(configToken) {
   const config = decodeConfig(configToken);
   const targetLabel = config.targets.map((value) => value.toUpperCase()).join("+");
   return {
-    id: "com.petomalik.stremio.skcz.deepl.subtitles.v110",
-    version: "1.1.0",
-    name: `SK/CZ DeepL titulky v1.1.0 (${targetLabel})`,
+    id: "com.petomalik.stremio.skcz.deepl.subtitles.v111",
+    version: "1.1.1",
+    name: `SK/CZ DeepL titulky v1.1.1 (${targetLabel})`,
     description: "Online preklad titulkov do slovenčiny a češtiny cez OpenSubtitles a DeepL.",
     resources: [{ name: "subtitles", types: ["movie", "series"] }],
     types: ["movie", "series"],
@@ -119,7 +119,7 @@ app.get("/health", (req, res) => {
   const settings = deepLSettings();
   res.json({
     ok: true,
-    version: "1.1.0",
+    version: "1.1.1",
     provider: "deepl",
     deeplConfigured: settings.configured,
     deeplPlan: settings.plan,
@@ -135,12 +135,12 @@ app.get("/health", (req, res) => {
 
 app.get("/debug/deepl", async (req, res) => {
   const settings = deepLSettings();
-  if (!settings.configured) return res.status(503).json({ ok: false, version: "1.1.0", settings, error: "DEEPL_API_KEY nie je nastavený" });
+  if (!settings.configured) return res.status(503).json({ ok: false, version: "1.1.1", settings, error: "DEEPL_API_KEY nie je nastavený" });
   try {
     const usage = await getDeepLUsage();
-    return res.json({ ok: true, version: "1.1.0", settings, usage });
+    return res.json({ ok: true, version: "1.1.1", settings, usage });
   } catch (error) {
-    return res.status(Number(error?.status || 500)).json({ ok: false, version: "1.1.0", settings, error: error.message, status: error?.status || null });
+    return res.status(Number(error?.status || 500)).json({ ok: false, version: "1.1.1", settings, error: error.message, status: error?.status || null, endpointAttempts: error?.endpointAttempts || [] });
   }
 });
 
@@ -149,13 +149,13 @@ app.get(["/debug/subtitles/:type/:id.json", "/:config/debug/subtitles/:type/:id.
     const config = decodeConfig(req.params.config);
     const extra = parseExtra("", req.query);
     const lookup = describeLookup({ type: req.params.type, id: req.params.id, extra, config });
-    return res.json({ ok: true, version: "1.1.0", lookup, exampleRequest: req.originalUrl });
+    return res.json({ ok: true, version: "1.1.1", lookup, exampleRequest: req.originalUrl });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
   }
 });
 
-app.get("/debug/recent-requests", (req, res) => res.json({ ok: true, version: "1.1.0", requests: recentSubtitleRequests }));
+app.get("/debug/recent-requests", (req, res) => res.json({ ok: true, version: "1.1.1", requests: recentSubtitleRequests }));
 app.get("/test.srt", (req, res) => {
   res.setHeader("Content-Type", "application/x-subrip; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
@@ -192,7 +192,7 @@ app.get("/debug/job/:jobId", async (req, res) => {
   const payload = await readJob(req.params.jobId);
   const ready = await getReadyJobOutput(req.params.jobId);
   const state = getTranslationJobState(req.params.jobId);
-  return res.json({ ok: true, version: "1.1.0", payload, state, ready: Boolean(ready?.srt), bytes: ready?.srt?.length || 0 });
+  return res.json({ ok: true, version: "1.1.1", payload, state, ready: Boolean(ready?.srt), bytes: ready?.srt?.length || 0 });
 });
 
 async function translatedSrtHandler(req, res) {
@@ -257,4 +257,4 @@ app.get("/translated/:token.srt", async (req, res) => {
 await ensureCacheDirs();
 await cleanupCache().catch((error) => console.warn("Cache cleanup failed:", error.message));
 setInterval(() => cleanupCache().catch(() => {}), 24 * 60 * 60 * 1000).unref();
-app.listen(PORT, () => console.log(`SK/CZ DeepL subtitle addon v1.1.0 listening on port ${PORT}`));
+app.listen(PORT, () => console.log(`SK/CZ DeepL subtitle addon v1.1.1 listening on port ${PORT}`));

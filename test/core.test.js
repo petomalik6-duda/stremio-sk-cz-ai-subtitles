@@ -4,7 +4,7 @@ import { encodeConfig, decodeConfig, LANGUAGE_META } from "../src/config.js";
 import { parseMediaId, parseExtra } from "../src/media.js";
 import { parseSubtitle, toWebVtt, toSrt, chunkCues, protectFormatting, restoreFormatting } from "../src/subtitles.js";
 import { signPayload, verifyPayload } from "../src/token.js";
-import { resolveDeepLBaseUrl, toDeepLSource, toDeepLTarget, translateCues, translateSrtDocument } from "../src/deepl.js";
+import { cleanDeepLApiKey, resolveDeepLBaseUrl, resolveDeepLBaseUrls, toDeepLSource, toDeepLTarget, translateCues, translateSrtDocument } from "../src/deepl.js";
 
 process.env.TOKEN_SECRET = "this-is-a-long-test-secret-1234567890";
 
@@ -84,6 +84,11 @@ test("SRT output uses comma timestamps and UTF-8 BOM", () => {
   assert.match(srt, /Ahoj/);
 });
 
+
+test("DeepL key cleanup and endpoint candidates", () => {
+  assert.equal(cleanDeepLApiKey(" DEEPL_API_KEY=\"abc:fx\" "), "abc:fx");
+  assert.deepEqual(resolveDeepLBaseUrls("abc:fx", "auto").slice(0, 2), ["https://api-free.deepl.com", "https://api.deepl.com"]);
+});
 
 test("DeepL endpoint auto-detection and language mapping", () => {
   assert.equal(resolveDeepLBaseUrl("abc:fx", "auto"), "https://api-free.deepl.com");

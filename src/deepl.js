@@ -13,31 +13,54 @@ const SOURCE_CODES = Object.freeze({
 });
 
 const TARGET_CODES = Object.freeze({ sk: "SK", cs: "CS" });
+const FREE_BASE_URL = "https://api-free.deepl.com";
+const PRO_BASE_URL = "https://api.deepl.com";
+let lastWorkingBaseUrl = null;
+
+export function cleanDeepLApiKey(raw = process.env.DEEPL_API_KEY || "") {
+  let value = String(raw || "").trim();
+  value = value.replace(/^DEEPL_API_KEY\s*=\s*/i, "").trim();
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1).trim();
+  }
+  return value.replace(/[\r\n\t ]+/g, "");
+}
 
 function requiredApiKey() {
-  const value = String(process.env.DEEPL_API_KEY || "").trim();
+  const value = cleanDeepLApiKey();
   if (!value) throw new Error("DEEPL_API_KEY nie je nastavený");
   return value;
 }
 
-export function resolveDeepLBaseUrl(apiKey = process.env.DEEPL_API_KEY || "", plan = process.env.DEEPL_API_PLAN || "auto") {
+export function resolveDeepLBaseUrls(apiKey = process.env.DEEPL_API_KEY || "", plan = process.env.DEEPL_API_PLAN || "auto") {
   const override = String(process.env.DEEPL_API_URL || "").trim().replace(/\/$/, "");
-  if (override) return override;
+  if (override) return [override];
   const normalized = String(plan || "auto").trim().toLowerCase();
-  if (normalized === "free") return "https://api-free.deepl.com";
-  if (normalized === "pro") return "https://api.deepl.com";
-  return String(apiKey).trim().endsWith(":fx")
-    ? "https://api-free.deepl.com"
-    : "https://api.deepl.com";
+  if (normalized === "free") return [FREE_BASE_URL];
+  if (normalized === "pro") return [PRO_BASE_URL];
+  const key = cleanDeepLApiKey(apiKey);
+  const preferred = key.endsWith(":fx") ? FREE_BASE_URL : PRO_BASE_URL;
+  const alternate = preferred === FREE_BASE_URL ? PRO_BASE_URL : FREE_BASE_URL;
+  const bases = lastWorkingBaseUrl ? [lastWorkingBaseUrl, preferred, alternate] : [preferred, alternate];
+  return [...new Set(bases)];
+}
+
+export function resolveDeepLBaseUrl(apiKey = process.env.DEEPL_API_KEY || "", plan = process.env.DEEPL_API_PLAN || "auto") {
+  return resolveDeepLBaseUrls(apiKey, plan)[0];
 }
 
 export function deepLSettings() {
-  const key = String(process.env.DEEPL_API_KEY || "").trim();
-  const baseUrl = resolveDeepLBaseUrl(key);
+  const key = cleanDeepLApiKey();
+  const candidates = resolveDeepLBaseUrls(key);
+  const baseUrl = candidates[0];
   return {
     configured: Boolean(key),
-    plan: baseUrl.includes("api-free.") ? "free" : "pro",
+    plan: String(process.env.DEEPL_API_PLAN || "auto").trim().toLowerCase(),
+    detectedPlan: baseUrl.includes("api-free.") ? "free" : "pro",
     baseUrl,
+    endpointCandidates: candidates,
+    keyEndsWithFx: key.endsWith(":fx"),
+    keyLength: key.length,
     translationMode: String(process.env.DEEPL_TRANSLATION_MODE || "document").trim().toLowerCase(),
     textModelType: String(process.env.DEEPL_MODEL_TYPE || "prefer_quality_optimized").trim()
   };
@@ -73,7 +96,7 @@ function isRetryableStatus(status) {
 
 function friendlyMessage(status, detail) {
   const raw = String(detail || "").trim();
-  if (status === 403) return "DeepL API kľúč je neplatný alebo nemá oprávnenie pre zvolený API endpoint.";
+  if (status === 403) return raw || "DeepL API kľúč bol odmietnutý.";
   if (status === 456) return "DeepL mesačný limit preložených znakov bol vyčerpaný.";
   if (status === 413) return "Titulkový súbor je pre DeepL príliš veľký.";
   if (status === 429) return "DeepL dočasne obmedzilo počet požiadaviek.";
@@ -116,10 +139,39 @@ async function fetchWithRetry(factory, label) {
   throw lastError || new Error(`DeepL ${label} zlyhalo`);
 }
 
+async function fetchWithEndpointFallback(factory, label) {
+  const candidates = resolveDeepLBaseUrls(requiredApiKey());
+  const attempts = [];
+  let lastError = null;
+  for (const baseUrl of candidates) {
+    try {
+      const response = await fetchWithRetry(() => factory(baseUrl), `${label} (${baseUrl})`);
+      lastWorkingBaseUrl = baseUrl;
+      return { response, baseUrl, attempts };
+    } catch (error) {
+      lastError = error;
+      attempts.push({ baseUrl, status: error?.status || null, message: error?.message || String(error) });
+      const plan = String(process.env.DEEPL_API_PLAN || "auto").trim().toLowerCase();
+      const canTryAlternate = plan === "auto" && [401, 403, 404].includes(Number(error?.status || 0));
+      if (!canTryAlternate) break;
+    }
+  }
+  if (attempts.length > 1 && attempts.every((entry) => [401, 403, 404].includes(Number(entry.status)))) {
+    const error = new Error(
+      "DeepL odmietlo kľúč na Free aj Pro API endpointoch. Skontroluj, že ide o kľúč z predplatného DeepL API (nie iba DeepL Translator/DeepL Pro), a v Renderi je vložený iba samotný kľúč bez názvu premennej a úvodzoviek."
+    );
+    error.status = lastError?.status || 403;
+    error.endpointAttempts = attempts;
+    throw error;
+  }
+  if (lastError) lastError.endpointAttempts = attempts;
+  throw lastError || new Error(`DeepL ${label} zlyhalo`);
+}
+
 function authHeaders(extra = {}) {
   return {
     Authorization: `DeepL-Auth-Key ${requiredApiKey()}`,
-    "User-Agent": process.env.DEEPL_USER_AGENT || "Stremio-SK-CZ-Subtitles/1.1.0",
+    "User-Agent": process.env.DEEPL_USER_AGENT || "Stremio-SK-CZ-Subtitles/1.1.1",
     ...extra
   };
 }
@@ -137,17 +189,16 @@ export async function translateSrtDocument(srt, source, target) {
     throw error;
   }
 
-  const baseUrl = resolveDeepLBaseUrl(requiredApiKey());
   const targetLang = toDeepLTarget(target);
   const sourceLang = toDeepLSource(source);
 
-  const uploadResponse = await fetchWithRetry(() => {
+  const { response: uploadResponse, baseUrl } = await fetchWithEndpointFallback((candidateBaseUrl) => {
     const form = new FormData();
     form.append("file", new Blob([String(srt)], { type: "application/x-subrip" }), "subtitles.srt");
     form.append("target_lang", targetLang);
     if (sourceLang) form.append("source_lang", sourceLang);
     form.append("output_format", "srt");
-    return fetch(`${baseUrl}/v2/document`, {
+    return fetch(`${candidateBaseUrl}/v2/document`, {
       method: "POST",
       headers: authHeaders(),
       body: form
@@ -207,7 +258,6 @@ function chunkTexts(items) {
 }
 
 async function translateTextBatch(entries, source, target) {
-  const baseUrl = resolveDeepLBaseUrl(requiredApiKey());
   const texts = entries.map((entry) => String(entry.text || ""));
   const body = {
     text: texts,
@@ -223,25 +273,24 @@ async function translateTextBatch(entries, source, target) {
   const contextChars = Math.max(0, Number(process.env.DEEPL_CONTEXT_CHARS || 2500));
   if (contextChars) body.context = texts.join(" ").slice(0, contextChars);
 
-  let response;
+  let result;
   try {
-    response = await fetchWithRetry(() => fetch(`${baseUrl}/v2/translate`, {
+    result = await fetchWithEndpointFallback((baseUrl) => fetch(`${baseUrl}/v2/translate`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
     }), "textový preklad");
   } catch (error) {
-    // Some accounts may reject model_type. Retry once without it on HTTP 400.
     if (error?.status !== 400 || !body.model_type) throw error;
     delete body.model_type;
-    response = await fetchWithRetry(() => fetch(`${baseUrl}/v2/translate`, {
+    result = await fetchWithEndpointFallback((baseUrl) => fetch(`${baseUrl}/v2/translate`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body)
     }), "textový preklad bez model_type");
   }
 
-  const data = await response.json();
+  const data = await result.response.json();
   const translations = Array.isArray(data?.translations) ? data.translations : [];
   if (translations.length !== entries.length) {
     throw new Error(`DeepL vrátil ${translations.length} prekladov namiesto ${entries.length}.`);
@@ -276,10 +325,15 @@ export async function translateCues(cues, source, target) {
 }
 
 export async function getDeepLUsage() {
-  const baseUrl = resolveDeepLBaseUrl(requiredApiKey());
-  const response = await fetchWithRetry(() => fetch(`${baseUrl}/v2/usage`, {
+  const { response, baseUrl, attempts } = await fetchWithEndpointFallback((candidateBaseUrl) => fetch(`${candidateBaseUrl}/v2/usage`, {
     method: "GET",
     headers: authHeaders({ Accept: "application/json" })
   }), "kontrola kvóty");
-  return response.json();
+  const usage = await response.json();
+  return {
+    ...usage,
+    endpoint: baseUrl,
+    detectedPlan: baseUrl.includes("api-free.") ? "free" : "pro",
+    endpointAttempts: attempts
+  };
 }

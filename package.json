@@ -1,6 +1,6 @@
 {
   "name": "stremio-sk-cz-deepl-subtitles",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
   "description": "Stremio addon for on-demand Slovak and Czech subtitle translation using OpenSubtitles and DeepL.",

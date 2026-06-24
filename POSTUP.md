@@ -1,4 +1,4 @@
-# Nasadenie SK/CZ DeepL titulkov 1.1.0
+# Nasadenie SK/CZ DeepL titulkov 1.1.1
 
 ## 1. DeepL API kľúč
 
@@ -39,7 +39,7 @@ TOKEN_SECRET=dlhy_nahodny_retazec
 PUBLIC_URL=https://tvoj-addon.onrender.com
 ```
 
-Premennú `GEMINI_API_KEY` môžeš odstrániť; verzia 1.1.0 ju nepoužíva.
+Premennú `GEMINI_API_KEY` môžeš odstrániť; verzia 1.1.1 ju nepoužíva.
 
 Spusti `Manual Deploy → Clear build cache & deploy`.
 
@@ -55,7 +55,7 @@ Musí obsahovať:
 
 ```json
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "provider": "deepl",
   "deeplConfigured": true
 }
@@ -75,6 +75,6 @@ Pri správnom kľúči bude `ok: true` a zobrazí sa spotreba/limit znakov. API 
 2. Úplne reštartuj Stremio.
 3. Otvor `https://tvoj-addon.onrender.com/configure`.
 4. Vyber jazyky a vytvor nový inštalačný odkaz.
-5. Nainštaluj addon `SK/CZ DeepL titulky v1.1.0`.
+5. Nainštaluj addon `SK/CZ DeepL titulky v1.1.1`.
 
 Pri prvom filme počkaj na dokončenie prekladu a potom znovu otvor menu titulkov.

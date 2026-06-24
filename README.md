@@ -1,4 +1,4 @@
-# SK/CZ DeepL titulky pre Stremio 1.1.0
+# SK/CZ DeepL titulky pre Stremio 1.1.1
 
 Samostatný Stremio addon, ktorý nájde zdrojové titulky cez OpenSubtitles a online ich preloží do slovenčiny alebo češtiny cez DeepL API.
 
@@ -47,3 +47,7 @@ DEEPL_CONCURRENCY=1
 ## Limity
 
 DeepL API Free obsahuje mesačný limit znakov. Preklad celého filmu môže spotrebovať desiatky tisíc znakov. Addon preto hotové preklady cacheuje.
+
+## Diagnostika kľúča vo verzii 1.1.1
+
+Pri `DEEPL_API_PLAN=auto` addon skúsi správny Free/Pro endpoint automaticky. Endpoint `/debug/deepl` vráti `endpoint`, `detectedPlan` a bezpečný zoznam pokusov bez zverejnenia API kľúča.
