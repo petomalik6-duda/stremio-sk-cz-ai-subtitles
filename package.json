@@ -1,0 +1,24 @@
+{
+  "name": "stremio-sk-cz-ai-subtitles",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stremio addon for on-demand Slovak and Czech AI subtitle translation using OpenSubtitles and Gemini.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test",
+    "check": "node --check server.js && find src -name '*.js' -print0 | xargs -0 -n1 node --check"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "2.10.0",
+    "adm-zip": "0.5.17",
+    "chardet": "2.2.0",
+    "express": "5.2.1",
+    "iconv-lite": "0.7.2"
+  }
+}

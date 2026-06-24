@@ -1,0 +1,114 @@
+import express from "express";
+import crypto from "node:crypto";
+import { decodeConfig, encodeConfig, normalizeConfig } from "./src/config.js";
+import { parseExtra } from "./src/media.js";
+import { verifyPayload } from "./src/token.js";
+import { ensureCacheDirs, cleanupCache } from "./src/cache.js";
+import { listTranslationOptions, buildTranslatedSubtitle } from "./src/service.js";
+
+const app = express();
+const PORT = Number(process.env.PORT || 7000);
+app.set("trust proxy", true);
+app.use(express.json({ limit: "64kb" }));
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
+const rateBuckets = new Map();
+function allowTranslation(req) {
+  const limit = Math.max(1, Number(process.env.TRANSLATION_RATE_LIMIT_PER_HOUR || 30));
+  const key = req.ip || "unknown";
+  const hour = Math.floor(Date.now() / 3_600_000);
+  const bucketKey = `${key}:${hour}`;
+  const count = (rateBuckets.get(bucketKey) || 0) + 1;
+  rateBuckets.set(bucketKey, count);
+  return count <= limit;
+}
+
+function manifest(configToken) {
+  const config = decodeConfig(configToken);
+  const targetLabel = config.targets.map((value) => value.toUpperCase()).join("+");
+  return {
+    id: "com.petomalik.stremio.skcz.ai.subtitles",
+    version: "1.0.0",
+    name: `SK/CZ AI titulky (${targetLabel})`,
+    description: "Online preklad titulkov do slovenčiny a češtiny cez OpenSubtitles a Gemini.",
+    resources: [{ name: "subtitles", types: ["movie", "series"], idPrefixes: ["tt"] }],
+    types: ["movie", "series"],
+    catalogs: [],
+    idPrefixes: ["tt"],
+    behaviorHints: { configurable: true, configurationRequired: false }
+  };
+}
+
+function errorVtt(message) {
+  const safe = String(message || "Neznáma chyba").replace(/[\r\n]+/g, " ").slice(0, 240);
+  return `WEBVTT\n\n00:00:00.000 --> 00:00:12.000\nPreklad titulkov zlyhal: ${safe}\n`;
+}
+
+function configPage(req) {
+  const origin = process.env.PUBLIC_URL?.replace(/\/$/, "") || `${req.get("x-forwarded-proto") || req.protocol}://${req.get("host")}`;
+  const status = {
+    Gemini: Boolean(process.env.GEMINI_API_KEY),
+    OpenSubtitles: Boolean(process.env.OPENSUBTITLES_API_KEY),
+    "OpenSubtitles účet": Boolean(process.env.OPENSUBTITLES_TOKEN || (process.env.OPENSUBTITLES_USERNAME && process.env.OPENSUBTITLES_PASSWORD)),
+    "TOKEN_SECRET": Boolean(process.env.TOKEN_SECRET && process.env.TOKEN_SECRET.length >= 24)
+  };
+  return `<!doctype html><html lang="sk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SK/CZ AI titulky</title><style>body{font-family:system-ui;max-width:760px;margin:40px auto;padding:0 18px;line-height:1.5}fieldset{margin:18px 0;padding:16px;border-radius:10px}button,a.button{display:inline-block;padding:12px 16px;border-radius:9px;border:0;background:#1769aa;color:white;text-decoration:none;cursor:pointer}code{background:#eee;padding:2px 5px;border-radius:4px}.ok{color:#087b35}.bad{color:#b00020}.url{word-break:break-all;padding:12px;background:#f4f4f4;border-radius:8px}</style></head><body><h1>SK/CZ AI titulky pre Stremio</h1><p>Preklad sa spustí online až po vybraní titulkov. Prvý preklad môže trvať dlhšie; ďalšie prehratie použije cache.</p><h2>Stav servera</h2><ul>${Object.entries(status).map(([k,v])=>`<li class="${v?'ok':'bad'}">${v?'✓':'✗'} ${k}</li>`).join('')}</ul><form id="form"><fieldset><legend>Cieľové jazyky</legend><label><input type="checkbox" name="target" value="sk" checked> Slovenčina</label><br><label><input type="checkbox" name="target" value="cs" checked> Čeština</label></fieldset><fieldset><legend>Zdrojové titulky</legend><label><input type="checkbox" name="source" value="en" checked> Angličtina</label><br><label><input type="checkbox" name="source" value="de"> Nemčina</label><br><label><input type="checkbox" name="source" value="pl"> Poľština</label></fieldset><fieldset><legend>Počet zdrojových variantov</legend><select name="maxCandidates"><option value="1">1 – najrýchlejšie</option><option value="2" selected>2 – odporúčané</option><option value="3">3 – viac možností</option></select></fieldset><button type="submit">Vytvoriť inštalačný odkaz</button></form><div id="result" hidden><h2>Inštalácia</h2><p class="url" id="manifest"></p><p><a class="button" id="install">Otvoriť v Stremio</a></p></div><script>const origin=${JSON.stringify(origin)};document.getElementById('form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);const cfg={targets:f.getAll('target'),sources:f.getAll('source'),maxCandidates:Number(f.get('maxCandidates'))};const r=await fetch('/api/config-token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(cfg)});const j=await r.json();const url=origin+'/'+j.token+'/manifest.json';document.getElementById('manifest').textContent=url;document.getElementById('install').href=url.replace(/^https?:\/\//,'stremio://');document.getElementById('result').hidden=false;});</script></body></html>`;
+}
+
+app.get(["/", "/configure"], (req, res) => res.type("html").send(configPage(req)));
+app.post("/api/config-token", (req, res) => res.json({ token: encodeConfig(normalizeConfig(req.body)) }));
+app.get("/manifest.json", (req, res) => res.json(manifest(null)));
+app.get("/:config/manifest.json", (req, res) => res.json(manifest(req.params.config)));
+app.get("/health", (req, res) => res.json({
+  ok: true,
+  version: "1.0.0",
+  geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+  openSubtitlesConfigured: Boolean(process.env.OPENSUBTITLES_API_KEY),
+  openSubtitlesAuthenticated: Boolean(process.env.OPENSUBTITLES_TOKEN || (process.env.OPENSUBTITLES_USERNAME && process.env.OPENSUBTITLES_PASSWORD)),
+  model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+  requestId: crypto.randomUUID()
+}));
+
+async function subtitleHandler(req, res) {
+  try {
+    const config = decodeConfig(req.params.config);
+    const extra = parseExtra(req.params.extra, req.query);
+    const subtitles = await listTranslationOptions({ req, config, type: req.params.type, id: req.params.id, extra });
+    res.setHeader("Cache-Control", "public, max-age=900, stale-while-revalidate=3600");
+    return res.json({ subtitles });
+  } catch (error) {
+    console.error("[subtitles]", error);
+    return res.json({ subtitles: [] });
+  }
+}
+app.get("/subtitles/:type/:id.json", subtitleHandler);
+app.get("/subtitles/:type/:id/:extra.json", subtitleHandler);
+app.get("/:config/subtitles/:type/:id.json", subtitleHandler);
+app.get("/:config/subtitles/:type/:id/:extra.json", subtitleHandler);
+
+app.get("/translated/:token.vtt", async (req, res) => {
+  res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "public, max-age=86400, stale-if-error=604800");
+  if (!allowTranslation(req)) return res.status(429).send(errorVtt("Bol prekročený hodinový limit prekladov."));
+  try {
+    const payload = verifyPayload(req.params.token);
+    const { vtt, cached } = await buildTranslatedSubtitle(payload);
+    res.setHeader("X-Translation-Cache", cached ? "HIT" : "MISS");
+    return res.send(vtt);
+  } catch (error) {
+    console.error("[translate]", error);
+    return res.status(500).send(errorVtt(error.message));
+  }
+});
+
+await ensureCacheDirs();
+await cleanupCache().catch((error) => console.warn("Cache cleanup failed:", error.message));
+setInterval(() => cleanupCache().catch(() => {}), 24 * 60 * 60 * 1000).unref();
+app.listen(PORT, () => console.log(`SK/CZ AI subtitle addon listening on port ${PORT}`));
