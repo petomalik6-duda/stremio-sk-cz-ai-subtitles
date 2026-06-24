@@ -1,8 +1,8 @@
 import { searchSubtitles, downloadSubtitleText } from "./opensubtitles.js";
 import { parseSubtitle, toWebVtt } from "./subtitles.js";
 import { translateCues } from "./gemini.js";
-import { readIfExists, writeAtomic, sourcePath, translatedPath } from "./cache.js";
-import { signPayload } from "./token.js";
+import crypto from "node:crypto";
+import { readIfExists, writeAtomic, sourcePath, translatedPath, writeJob } from "./cache.js";
 import { LANGUAGE_META } from "./config.js";
 import { parseMediaId } from "./media.js";
 
@@ -52,26 +52,32 @@ export function describeLookup({ type, id, extra, config }) {
 
 export async function listTranslationOptions({ req, config, type, id, extra }) {
   const media = parseMediaId(type, id, extra);
-  if (!hasLookupClue(media)) return [];
-
   const base = publicBase(req);
   const subtitles = [];
   const lookup = compactLookup(media, type, config.sources, config.maxCandidates);
 
-  // Lazy translation entries: OpenSubtitles search starts only when the user selects a track.
+  // Keep URLs short for Android TV / Google TV clients. The full lookup payload is
+  // stored server-side and addressed by a compact job id.
   for (const target of config.targets) {
     for (let candidateIndex = 0; candidateIndex < config.maxCandidates; candidateIndex += 1) {
-      const token = signPayload({
+      const payload = {
         lookup,
         target,
         candidateIndex,
         mediaId: id,
-        version: 2
-      });
+        version: 3,
+        exp: Date.now() + Math.max(1, Number(process.env.SIGNED_URL_TTL_HOURS || 168)) * 60 * 60 * 1000
+      };
+      const stable = JSON.stringify({ lookup, target, candidateIndex, mediaId: id, version: 3 });
+      const jobId = crypto.createHmac("sha256", process.env.TOKEN_SECRET || "missing-secret")
+        .update(stable)
+        .digest("hex")
+        .slice(0, 32);
+      await writeJob(jobId, payload);
       subtitles.push({
-        id: `ai-${target}-${candidateIndex + 1}-${String(id).slice(0, 32)}`,
+        id: `skcz-ai-${target}-${candidateIndex + 1}-${crypto.createHash("sha1").update(String(id)).digest("hex").slice(0, 10)}`,
         lang: LANGUAGE_META[target].stremio,
-        url: `${base}/translated/${token}.vtt`
+        url: `${base}/t/${jobId}.vtt`
       });
     }
   }

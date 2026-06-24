@@ -1,6 +1,6 @@
 {
   "name": "stremio-sk-cz-ai-subtitles",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
   "description": "Stremio addon for on-demand Slovak and Czech AI subtitle translation using OpenSubtitles and Gemini.",

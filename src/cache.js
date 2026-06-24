@@ -5,10 +5,12 @@ import crypto from "node:crypto";
 const ROOT = path.resolve(process.env.CACHE_DIR || "./data/cache");
 const SOURCE_DIR = path.join(ROOT, "source");
 const TRANSLATED_DIR = path.join(ROOT, "translated");
+const JOB_DIR = path.join(ROOT, "jobs");
 
 export async function ensureCacheDirs() {
   await fs.mkdir(SOURCE_DIR, { recursive: true });
   await fs.mkdir(TRANSLATED_DIR, { recursive: true });
+  await fs.mkdir(JOB_DIR, { recursive: true });
 }
 
 export function cacheKey(input) {
@@ -21,6 +23,20 @@ export function sourcePath(fileId) {
 
 export function translatedPath(key) {
   return path.join(TRANSLATED_DIR, `${cacheKey(key)}.vtt`);
+}
+
+export function jobPath(jobId) {
+  return path.join(JOB_DIR, `${String(jobId).replace(/[^a-f0-9]/gi, "")}.json`);
+}
+
+export async function writeJob(jobId, payload) {
+  await writeAtomic(jobPath(jobId), JSON.stringify(payload));
+}
+
+export async function readJob(jobId) {
+  const raw = await readIfExists(jobPath(jobId));
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
 }
 
 export async function readIfExists(file) {
@@ -42,7 +58,7 @@ export async function writeAtomic(file, content) {
 export async function cleanupCache() {
   const maxAgeDays = Math.max(1, Number(process.env.CACHE_MAX_AGE_DAYS || 30));
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-  for (const dir of [SOURCE_DIR, TRANSLATED_DIR]) {
+  for (const dir of [SOURCE_DIR, TRANSLATED_DIR, JOB_DIR]) {
     let entries = [];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { encodeConfig, decodeConfig } from "../src/config.js";
+import { encodeConfig, decodeConfig, LANGUAGE_META } from "../src/config.js";
 import { parseMediaId, parseExtra } from "../src/media.js";
 import { parseSubtitle, toWebVtt, chunkCues, protectFormatting, restoreFormatting } from "../src/subtitles.js";
 import { signPayload, verifyPayload } from "../src/token.js";
@@ -66,4 +66,10 @@ test("filename fallback query", () => {
   assert.equal(parsed.season, 2);
   assert.equal(parsed.episode, 3);
   assert.match(parsed.query, /Example Show S02E03/i);
+});
+
+
+test("TV-compatible language codes", () => {
+  assert.equal(LANGUAGE_META.sk.stremio, "slk");
+  assert.equal(LANGUAGE_META.cs.stremio, "ces");
 });

@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { decodeConfig, encodeConfig, normalizeConfig } from "./src/config.js";
 import { parseExtra } from "./src/media.js";
 import { verifyPayload } from "./src/token.js";
-import { ensureCacheDirs, cleanupCache } from "./src/cache.js";
+import { ensureCacheDirs, cleanupCache, readJob } from "./src/cache.js";
 import { listTranslationOptions, buildTranslatedSubtitle, describeLookup } from "./src/service.js";
 
 const app = express();
@@ -17,6 +17,18 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
+
+
+const recentSubtitleRequests = [];
+function rememberSubtitleRequest(req, details) {
+  recentSubtitleRequests.unshift({
+    at: new Date().toISOString(),
+    path: req.originalUrl,
+    userAgent: req.get("user-agent") || "",
+    ...details
+  });
+  recentSubtitleRequests.splice(25);
+}
 
 const rateBuckets = new Map();
 function allowTranslation(req) {
@@ -33,11 +45,11 @@ function manifest(configToken) {
   const config = decodeConfig(configToken);
   const targetLabel = config.targets.map((value) => value.toUpperCase()).join("+");
   return {
-    id: "com.petomalik.stremio.skcz.ai.subtitles",
-    version: "1.0.3",
-    name: `SK/CZ AI titulky (${targetLabel})`,
+    id: "com.petomalik.stremio.skcz.ai.subtitles.v104",
+    version: "1.0.4",
+    name: `SK/CZ AI titulky v1.0.4 (${targetLabel})`,
     description: "Online preklad titulkov do slovenčiny a češtiny cez OpenSubtitles a Gemini.",
-    resources: [{ name: "subtitles", types: ["movie", "series"] }],
+    resources: ["subtitles"],
     types: ["movie", "series"],
     catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: false }
@@ -62,11 +74,11 @@ function configPage(req) {
 
 app.get(["/", "/configure"], (req, res) => res.type("html").send(configPage(req)));
 app.post("/api/config-token", (req, res) => res.json({ token: encodeConfig(normalizeConfig(req.body)) }));
-app.get("/manifest.json", (req, res) => res.json(manifest(null)));
-app.get("/:config/manifest.json", (req, res) => res.json(manifest(req.params.config)));
+app.get("/manifest.json", (req, res) => { res.setHeader("Cache-Control", "no-store"); res.json(manifest(null)); });
+app.get("/:config/manifest.json", (req, res) => { res.setHeader("Cache-Control", "no-store"); res.json(manifest(req.params.config)); });
 app.get("/health", (req, res) => res.json({
   ok: true,
-  version: "1.0.3",
+  version: "1.0.4",
   geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
   openSubtitlesConfigured: Boolean(process.env.OPENSUBTITLES_API_KEY),
   openSubtitlesAuthenticated: Boolean(process.env.OPENSUBTITLES_TOKEN || (process.env.OPENSUBTITLES_USERNAME && process.env.OPENSUBTITLES_PASSWORD)),
@@ -85,15 +97,24 @@ app.get(["/debug/subtitles/:type/:id.json", "/:config/debug/subtitles/:type/:id.
   }
 });
 
+app.get("/debug/recent-requests", (req, res) => res.json({ ok: true, version: "1.0.4", requests: recentSubtitleRequests }));
+
+app.get("/test.vtt", (req, res) => {
+  res.type("text/vtt; charset=utf-8").send("WEBVTT\n\n00:00:00.000 --> 00:00:08.000\nSK/CZ AI subtitle addon je pripojený.\n");
+});
+
 async function subtitleHandler(req, res) {
   try {
     const config = decodeConfig(req.params.config);
     const extra = parseExtra(req.params.extra, req.query);
     const subtitles = await listTranslationOptions({ req, config, type: req.params.type, id: req.params.id, extra });
-    console.log("[subtitles]", { type: req.params.type, id: req.params.id, extra, count: subtitles.length });
+    const details = { type: req.params.type, id: req.params.id, extra, count: subtitles.length };
+    rememberSubtitleRequest(req, details);
+    console.log("[subtitles]", details);
     res.setHeader("Cache-Control", "no-store");
     return res.json({ subtitles });
   } catch (error) {
+    rememberSubtitleRequest(req, { type: req.params.type, id: req.params.id, error: error.message, count: 0 });
     console.error("[subtitles]", error);
     return res.json({ subtitles: [] });
   }
@@ -102,6 +123,29 @@ app.get("/subtitles/:type/:id.json", subtitleHandler);
 app.get("/subtitles/:type/:id/:extra.json", subtitleHandler);
 app.get("/:config/subtitles/:type/:id.json", subtitleHandler);
 app.get("/:config/subtitles/:type/:id/:extra.json", subtitleHandler);
+// Compatibility aliases for clients or integrations using the old singular path.
+app.get("/subtitle/:type/:id.json", subtitleHandler);
+app.get("/subtitle/:type/:id/:extra.json", subtitleHandler);
+app.get("/:config/subtitle/:type/:id.json", subtitleHandler);
+app.get("/:config/subtitle/:type/:id/:extra.json", subtitleHandler);
+
+app.get("/t/:jobId.vtt", async (req, res) => {
+  res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "public, max-age=86400, stale-if-error=604800");
+  if (!allowTranslation(req)) return res.status(429).send(errorVtt("Bol prekročený hodinový limit prekladov."));
+  try {
+    const payload = await readJob(req.params.jobId);
+    if (!payload) throw new Error("Prekladová úloha už nie je dostupná. Znovu otvor titulky v prehrávači.");
+    if (!payload.exp || Date.now() > Number(payload.exp)) throw new Error("Prekladová úloha vypršala. Znovu otvor titulky v prehrávači.");
+    const { vtt, cached } = await buildTranslatedSubtitle(payload);
+    res.setHeader("X-Translation-Cache", cached ? "HIT" : "MISS");
+    return res.send(vtt);
+  } catch (error) {
+    console.error("[translate-job]", error);
+    return res.status(500).send(errorVtt(error.message));
+  }
+});
 
 app.get("/translated/:token.vtt", async (req, res) => {
   res.setHeader("Content-Type", "text/vtt; charset=utf-8");
